@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>PDF Splitter</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0a0f;
+    --panel: #13131a;
+    --border: #2a2a3a;
+    --accent: #6c63ff;
+    --accent2: #ff6584;
+    --text: #e8e8f0;
+    --muted: #6b6b80;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Syne', sans-serif;
+    min-height: 100vh;
+  }
+  .mono { font-family: 'DM Mono', monospace; }
+
+  /* Drop Zone */
+  #drop-zone {
+    border: 2px dashed var(--border);
+    transition: border-color 0.2s, background 0.2s;
+  }
+  #drop-zone.drag-over {
+    border-color: var(--accent);
+    background: rgba(108,99,255,0.06);
+  }
+
+  /* Range Slider */
+  input[type=range] {
+    -webkit-appearance: none;
+    width: 100%;
+    height: 6px;
+    background: var(--border);
+    border-radius: 3px;
+    outline: none;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 18px; height: 18px;
+    background: var(--accent);
+    border-radius: 50%;
+    cursor: pointer;
+    box-shadow: 0 0 8px rgba(108,99,255,0.6);
+  }
+
+  /* Chunk preview cards */
+  .chunk-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    transition: border-color 0.2s;
+  }
+  .chunk-card:hover { border-color: var(--accent); }
+  .chunk-num {
+    background: rgba(108,99,255,0.15);
+    color: var(--accent);
+    font-weight: 700;
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 13px;
+  }
+
+  /* Btn */
+  .btn-primary {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 12px 28px;
+    font-family: 'Syne', sans-serif;
+    font-weight: 700;
+    font-size: 15px;
+    cursor: pointer;
+    transition: opacity 0.2s, transform 0.1s;
+  }
+  .btn-primary:hover { opacity: 0.88; }
+  .btn-primary:active { transform: scale(0.97); }
+  .btn-primary:disabled { opacity: 0.35; cursor: not-allowed; }
+
+  .btn-ghost {
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 20px;
+    font-family: 'Syne', sans-serif;
+    font-weight: 600;
+    font-size: 14px;
+    cursor: pointer;
+    transition: border-color 0.2s, color 0.2s;
+  }
+  .btn-ghost:hover { border-color: var(--accent); color: var(--text); }
+
+  /* Progress bar */
+  #progress-bar {
+    height: 4px;
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    border-radius: 2px;
+    width: 0%;
+    transition: width 0.3s;
+  }
+
+  /* Number input */
+  .num-input {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-family: 'DM Mono', monospace;
+    font-size: 18px;
+    font-weight: 500;
+    text-align: center;
+    width: 80px;
+    padding: 8px;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  .num-input:focus { border-color: var(--accent); }
+
+  /* Noise overlay */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+    pointer-events: none;
+    z-index: 0;
+  }
+  .content { position: relative; z-index: 1; }
+
+  /* Tag pill */
+  .pill {
+    display: inline-block;
+    background: rgba(108,99,255,0.12);
+    color: var(--accent);
+    border: 1px solid rgba(108,99,255,0.25);
+    border-radius: 99px;
+    padding: 3px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+  }
+
+  /* Download item */
+  .dl-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 16px;
+    gap: 12px;
+  }
+  .dl-btn {
+    background: rgba(108,99,255,0.15);
+    color: var(--accent);
+    border: 1px solid rgba(108,99,255,0.3);
+    border-radius: 6px;
+    padding: 6px 14px;
+    font-family: 'Syne', sans-serif;
+    font-weight: 700;
+    font-size: 13px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.2s;
+  }
+  .dl-btn:hover { background: rgba(108,99,255,0.3); }
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(16px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .fade-up { animation: fadeUp 0.4s ease both; }
+
+  /* Custom number stepper */
+  .stepper { display: flex; align-items: center; gap: 8px; }
+  .step-btn {
+    width: 32px; height: 32px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 18px;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: border-color 0.2s, color 0.2s;
+    user-select: none;
+  }
+  .step-btn:hover { border-color: var(--accent); color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="content max-w-2xl mx-auto px-4 py-12">
+
+  <!-- Header -->
+  <div class="mb-10 fade-up">
+    <div class="pill mb-3">Browser-side · No upload</div>
+    <h1 style="font-size:2.4rem;font-weight:800;line-height:1.1;letter-spacing:-0.03em;">
+      PDF <span style="color:var(--accent);">Splitter</span>
+    </h1>
+    <p style="color:var(--muted);margin-top:8px;font-size:15px;">
+      Upload a PDF, set pages per chunk — download all splits instantly.
+    </p>
+  </div>
+
+  <!-- Drop Zone -->
+  <div id="drop-zone" class="rounded-xl p-10 text-center cursor-pointer fade-up mb-6"
+       style="animation-delay:0.05s" onclick="document.getElementById('file-input').click()">
+    <input type="file" id="file-input" accept="application/pdf" class="hidden" />
+    <div id="drop-icon" style="font-size:2.5rem;margin-bottom:12px;">📄</div>
+    <div id="drop-text" style="font-weight:700;font-size:1.1rem;">Drop your PDF here</div>
+    <div style="color:var(--muted);font-size:13px;margin-top:4px;">or click to browse</div>
+  </div>
+
+  <!-- File Info -->
+  <div id="file-info" class="hidden mb-6 fade-up">
+    <div class="chunk-card">
+      <span style="font-size:1.6rem;">📑</span>
+      <div class="flex-1 min-w-0">
+        <div id="file-name" class="mono truncate" style="font-size:14px;font-weight:500;"></div>
+        <div id="file-meta" style="color:var(--muted);font-size:12px;margin-top:2px;"></div>
+      </div>
+      <button class="btn-ghost" style="padding:6px 14px;font-size:13px;" onclick="resetAll()">✕ Remove</button>
+    </div>
+  </div>
+
+  <!-- Split Config -->
+  <div id="split-config" class="hidden mb-6 fade-up" style="animation-delay:0.1s">
+    <div style="background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:24px;">
+      <div style="font-weight:700;font-size:1rem;margin-bottom:4px;">Pages per chunk</div>
+      <div style="color:var(--muted);font-size:13px;margin-bottom:18px;">
+        Each split PDF will contain this many pages (last chunk may have fewer).
+      </div>
+
+      <div class="flex items-center gap-6 flex-wrap">
+        <!-- Stepper -->
+        <div class="stepper">
+          <button class="step-btn" onclick="adjustChunk(-1)">−</button>
+          <input type="number" id="chunk-input" class="num-input" value="3" min="1" max="500" oninput="updatePreview()" />
+          <button class="step-btn" onclick="adjustChunk(1)">+</button>
+        </div>
+
+        <!-- Slider -->
+        <div class="flex-1" style="min-width:180px;">
+          <input type="range" id="chunk-slider" min="1" max="50" value="3" oninput="syncSlider()" />
+          <div class="flex justify-between mono" style="font-size:11px;color:var(--muted);margin-top:4px;">
+            <span>1</span><span id="slider-max">50</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Summary -->
+      <div id="split-summary" class="mt-5" style="font-size:13px;color:var(--muted);"></div>
+    </div>
+  </div>
+
+  <!-- Chunk Preview -->
+  <div id="chunk-preview" class="hidden mb-6 fade-up" style="animation-delay:0.15s">
+    <div style="font-weight:700;font-size:0.85rem;letter-spacing:0.05em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;">
+      Preview — Chunks
+    </div>
+    <div id="chunk-list" class="flex flex-col gap-2" style="max-height:260px;overflow-y:auto;padding-right:4px;"></div>
+  </div>
+
+  <!-- Actions -->
+  <div id="action-bar" class="hidden flex gap-3 flex-wrap fade-up" style="animation-delay:0.2s">
+    <button class="btn-primary" id="split-btn" onclick="splitPDF()">
+      ⚡ Split &amp; Download All
+    </button>
+    <div style="color:var(--muted);font-size:12px;align-self:center;">
+      Downloads as a ZIP file
+    </div>
+  </div>
+
+  <!-- Progress -->
+  <div id="progress-wrap" class="hidden mt-6 fade-up">
+    <div style="display:flex;justify-content:space-between;font-size:13px;color:var(--muted);margin-bottom:6px;">
+      <span id="progress-label">Processing…</span>
+      <span id="progress-pct" class="mono">0%</span>
+    </div>
+    <div style="background:var(--border);border-radius:2px;overflow:hidden;">
+      <div id="progress-bar"></div>
+    </div>
+  </div>
+
+  <!-- Downloads -->
+  <div id="downloads-wrap" class="hidden mt-8 fade-up">
+    <div style="font-weight:700;font-size:0.85rem;letter-spacing:0.05em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;">
+      Ready to Download
+    </div>
+    <div class="mb-3">
+      <button class="btn-primary" id="dl-all-btn">⬇ Download ZIP</button>
+    </div>
+    <div id="dl-list" class="flex flex-col gap-2"></div>
+  </div>
+
+</div>
+
+<script>
+  const { PDFDocument } = PDFLib;
+
+  let pdfFile = null;
+  let pdfDoc = null;
+  let totalPages = 0;
+  let splitBlobs = []; // { name, blob }
+
+  /* ───────── File Input ───────── */
+  const fileInput = document.getElementById('file-input');
+  const dropZone = document.getElementById('drop-zone');
+
+  fileInput.addEventListener('change', e => loadFile(e.target.files[0]));
+
+  dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+  dropZone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropZone.classList.remove('drag-over');
+    const f = e.dataTransfer.files[0];
+    if (f && f.type === 'application/pdf') loadFile(f);
+  });
+
+  async function loadFile(file) {
+    if (!file) return;
+    pdfFile = file;
+
+    const arrayBuffer = await file.arrayBuffer();
+    pdfDoc = await PDFDocument.load(arrayBuffer);
+    totalPages = pdfDoc.getPageCount();
+
+    // Update UI
+    document.getElementById('file-info').classList.remove('hidden');
+    document.getElementById('split-config').classList.remove('hidden');
+    document.getElementById('chunk-preview').classList.remove('hidden');
+    document.getElementById('action-bar').classList.remove('hidden');
+    document.getElementById('downloads-wrap').classList.add('hidden');
+    document.getElementById('drop-zone').classList.add('hidden');
+
+    document.getElementById('file-name').textContent = file.name;
+    document.getElementById('file-meta').textContent =
+      `${totalPages} pages · ${(file.size / 1024).toFixed(1)} KB`;
+
+    // Slider max = total pages
+    const slider = document.getElementById('chunk-slider');
+    const maxVal = Math.min(totalPages, 500);
+    slider.max = maxVal;
+    document.getElementById('slider-max').textContent = maxVal;
+
+    // Default chunk = 3 or total if < 3
+    const def = Math.min(3, totalPages);
+    document.getElementById('chunk-input').value = def;
+    slider.value = def;
+
+    updatePreview();
+  }
+
+  /* ───────── Stepper / Slider ───────── */
+  function adjustChunk(delta) {
+    const inp = document.getElementById('chunk-input');
+    let v = parseInt(inp.value) + delta;
+    v = Math.max(1, Math.min(v, totalPages || 500));
+    inp.value = v;
+    document.getElementById('chunk-slider').value = v;
+    updatePreview();
+  }
+
+  function syncSlider() {
+    const v = document.getElementById('chunk-slider').value;
+    document.getElementById('chunk-input').value = v;
+    updatePreview();
+  }
+
+  function chunkSize() {
+    return Math.max(1, Math.min(parseInt(document.getElementById('chunk-input').value) || 1, totalPages || 9999));
+  }
+
+  function updatePreview() {
+    if (!totalPages) return;
+    const size = chunkSize();
+    const count = Math.ceil(totalPages / size);
+
+    document.getElementById('split-summary').innerHTML =
+      `<b style="color:var(--text)">${count} split file${count !== 1 ? 's' : ''}</b> — ` +
+      `${size} pages each (last may have fewer if ${totalPages} isn't divisible by ${size})`;
+
+    // Build chunk list
+    const list = document.getElementById('chunk-list');
+    list.innerHTML = '';
+    for (let i = 0; i < count; i++) {
+      const start = i * size + 1;
+      const end = Math.min((i + 1) * size, totalPages);
+      const card = document.createElement('div');
+      card.className = 'chunk-card';
+      card.innerHTML = `
+        <span class="chunk-num">#${String(i + 1).padStart(2, '0')}</span>
+        <span class="mono" style="font-size:13px;flex:1">Pages ${start}–${end}</span>
+        <span style="color:var(--muted);font-size:12px;">${end - start + 1} page${(end - start) > 0 ? 's' : ''}</span>
+      `;
+      list.appendChild(card);
+    }
+  }
+
+  /* ───────── Reset ───────── */
+  function resetAll() {
+    pdfFile = null; pdfDoc = null; totalPages = 0; splitBlobs = [];
+    fileInput.value = '';
+    document.getElementById('file-info').classList.add('hidden');
+    document.getElementById('split-config').classList.add('hidden');
+    document.getElementById('chunk-preview').classList.add('hidden');
+    document.getElementById('action-bar').classList.add('hidden');
+    document.getElementById('progress-wrap').classList.add('hidden');
+    document.getElementById('downloads-wrap').classList.add('hidden');
+    document.getElementById('drop-zone').classList.remove('hidden');
+    document.getElementById('chunk-list').innerHTML = '';
+    document.getElementById('dl-list').innerHTML = '';
+  }
+
+  /* ───────── Split & Download ───────── */
+  async function splitPDF() {
+    if (!pdfDoc) return;
+    const size = chunkSize();
+    const count = Math.ceil(totalPages / size);
+
+    // Show progress
+    document.getElementById('progress-wrap').classList.remove('hidden');
+    document.getElementById('downloads-wrap').classList.add('hidden');
+    document.getElementById('split-btn').disabled = true;
+
+    const bar = document.getElementById('progress-bar');
+    const pct = document.getElementById('progress-pct');
+    const label = document.getElementById('progress-label');
+
+    splitBlobs = [];
+    const baseName = pdfFile.name.replace(/\.pdf$/i, '');
+
+    // Load original bytes once
+    const srcBytes = await pdfFile.arrayBuffer();
+
+    for (let i = 0; i < count; i++) {
+      const start = i * size;
+      const end = Math.min((i + 1) * size, totalPages);
+
+      label.textContent = `Processing chunk ${i + 1} of ${count}…`;
+      const progress = Math.round(((i) / count) * 100);
+      bar.style.width = progress + '%';
+      pct.textContent = progress + '%';
+
+      // Create new doc
+      const newDoc = await PDFDocument.create();
+      const srcDoc = await PDFDocument.load(srcBytes);
+      const pageIndices = Array.from({ length: end - start }, (_, k) => start + k);
+      const copiedPages = await newDoc.copyPages(srcDoc, pageIndices);
+      copiedPages.forEach(p => newDoc.addPage(p));
+
+      const bytes = await newDoc.save();
+      const blob = new Blob([bytes], { type: 'application/pdf' });
+      const name = `${baseName}_part${String(i + 1).padStart(3, '0')}_pages${start + 1}-${end}.pdf`;
+      splitBlobs.push({ name, blob });
+
+      // Yield to browser
+      await new Promise(r => setTimeout(r, 0));
+    }
+
+    bar.style.width = '100%';
+    pct.textContent = '100%';
+    label.textContent = `Done! ${count} files ready.`;
+
+    // Build download list
+    buildDownloads(baseName);
+    document.getElementById('split-btn').disabled = false;
+  }
+
+  function buildDownloads(baseName) {
+    document.getElementById('downloads-wrap').classList.remove('hidden');
+    const list = document.getElementById('dl-list');
+    list.innerHTML = '';
+
+    splitBlobs.forEach(({ name, blob }, i) => {
+      const url = URL.createObjectURL(blob);
+      const item = document.createElement('div');
+      item.className = 'dl-item';
+      item.innerHTML = `
+        <span class="chunk-num">#${String(i + 1).padStart(2, '0')}</span>
+        <span class="mono flex-1 truncate" style="font-size:12px;">${name}</span>
+        <a href="${url}" download="${name}" class="dl-btn">⬇ Download</a>
+      `;
+      list.appendChild(item);
+    });
+
+    // ZIP all
+    document.getElementById('dl-all-btn').onclick = async () => {
+      const btn = document.getElementById('dl-all-btn');
+      btn.textContent = '⏳ Zipping…';
+      btn.disabled = true;
+
+      const zip = new JSZip();
+      splitBlobs.forEach(({ name, blob }) => zip.file(name, blob));
+      const zipBlob = await zip.generateAsync({ type: 'blob' });
+      const url = URL.createObjectURL(zipBlob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${baseName}_splits.zip`;
+      a.click();
+
+      btn.textContent = '⬇ Download ZIP';
+      btn.disabled = false;
+    };
+  }
+</script>
+</body>
+</html>
